@@ -1,0 +1,12 @@
+body { background: #f7f8fc; }
+.sidebar { width: 260px; min-height: 100vh; background: #ffffff; border-right: 1px solid #e9ecef; }
+.content { min-height: 100vh; }
+.nav-link { color: #24324b; border-radius: 12px; }
+.nav-link:hover { background: #eef4ff; }
+.rack-cell { border-radius: 18px; padding: 18px; text-align: center; color: #18212f; }
+.count-low { background: #dff6e5; }
+.count-mid { background: #fff0c2; }
+.count-high { background: #ffd7bf; }
+.rack-title { font-weight: 700; margin-bottom: 6px; }
+.rack-count { font-size: 1.8rem; font-weight: 700; }
+.card { border: none; }
