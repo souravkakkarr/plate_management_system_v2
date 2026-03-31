@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2 class="mb-3">Scrap Approval</h2>
+<div class="card shadow-sm rounded-4 p-4">
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead><tr><th>ID</th><th>Type</th><th>Job ID</th><th>Plate Set ID</th><th>Replacement Plate ID</th><th>Requested By</th><th>Reason</th><th>Action</th></tr></thead>
+      <tbody>
+        {% for req in pending %}
+        <tr>
+          <td>{{ req.id }}</td>
+          <td>{{ req.request_type }}</td>
+          <td>{{ req.target_job_id or '' }}</td>
+          <td>{{ req.target_plate_set_id or '' }}</td>
+          <td>{{ req.target_replacement_plate_id or '' }}</td>
+          <td>{{ req.requester.email }}</td>
+          <td>{{ req.request_reason or '' }}</td>
+          <td>
+            <form method="post" action="/scrap-approval/{{ req.id }}/approve" class="d-inline">
+              <input type="hidden" name="note" value="Approved">
+              <button class="btn btn-success btn-sm">Approve</button>
+            </form>
+            <form method="post" action="/scrap-approval/{{ req.id }}/reject" class="d-inline">
+              <input type="hidden" name="note" value="Rejected">
+              <button class="btn btn-danger btn-sm">Reject</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="text-muted">No pending requests.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

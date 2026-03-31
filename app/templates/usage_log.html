@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2 class="mb-3">Usage Log</h2>
+{% if success %}<div class="alert alert-success">{{ success }}</div>{% endif %}
+{% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+<div class="card shadow-sm rounded-4 p-4 mb-4">
+  <form method="post" action="/usage-log" class="row g-3">
+    <div class="col-md-3"><label class="form-label">Plate Set ID</label><input class="form-control upper-input" name="plate_set_id" required></div>
+    <div class="col-md-2"><label class="form-label">Action</label><select class="form-select upper-input" name="action_type"><option>IN</option><option>OUT</option></select></div>
+    <div class="col-md-2"><label class="form-label">Date</label><input class="form-control" type="date" name="action_date" required></div>
+    <div class="col-md-2"><label class="form-label">Time</label><input class="form-control" type="time" name="action_time" required></div>
+    <div class="col-md-3"><label class="form-label">Remarks</label><input class="form-control upper-input" name="remarks"></div>
+    <div class="col-12"><button class="btn btn-primary">Add Usage Entry</button></div>
+  </form>
+</div>
+<div class="card shadow-sm rounded-4 p-4">
+  <h5>Recent Usage Entries</h5>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead><tr><th>Date</th><th>Time</th><th>Plate Set ID</th><th>Action</th><th>Remarks</th></tr></thead>
+      <tbody>
+        {% for log in logs %}
+        <tr><td>{{ log.action_date.strftime('%d/%m/%Y') }}</td><td>{{ log.action_time }}</td><td>{{ log.plate_set_id }}</td><td>{{ log.action_type }}</td><td>{{ log.remarks or '' }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

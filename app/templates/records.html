@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2 class="mb-3">Show Plate Record</h2>
+<div class="card shadow-sm rounded-4 p-4 mb-4">
+  <form method="post" action="/records" class="row g-3 align-items-end">
+    <div class="col-md-6"><label class="form-label">Job ID</label><input class="form-control upper-input" name="job_id" required value="{{ searched_job_id if searched else '' }}"></div>
+    <div class="col-md-3"><button class="btn btn-primary">Search</button></div>
+  </form>
+</div>
+{% if searched and not plate_set %}<div class="alert alert-warning">No plate set record found for this Job ID.</div>{% endif %}
+{% if plate_set %}
+<div class="card shadow-sm rounded-4 p-4 mb-4">
+  <h5>Plate Set Master Details</h5>
+  <div class="row g-2">
+    <div class="col-md-4"><strong>Job ID:</strong> {{ plate_set.job_id }}</div>
+    <div class="col-md-4"><strong>Job Name:</strong> {{ plate_set.job_name }}</div>
+    <div class="col-md-4"><strong>Party Name:</strong> {{ plate_set.party_name }}</div>
+    <div class="col-md-4"><strong>Plate Set ID:</strong> {{ plate_set.plate_set_id }}</div>
+    <div class="col-md-4"><strong>No. of Plates:</strong> {{ plate_set.number_of_plates }}</div>
+    <div class="col-md-4"><strong>Plate Size:</strong> {{ plate_set.plate_size }}</div>
+    <div class="col-md-4"><strong>Gripper Size:</strong> {{ plate_set.gripper_size_mm }}</div>
+    <div class="col-md-4"><strong>Color Details:</strong> {{ plate_set.color_details }}</div>
+    <div class="col-md-4"><strong>Receiving Date:</strong> {{ plate_set.receiving_date.strftime('%d/%m/%Y') }}</div>
+    <div class="col-md-4"><strong>Plate From Party:</strong> {{ plate_set.plate_from_party }}</div>
+    <div class="col-md-4"><strong>Vendor Name:</strong> {{ plate_set.vendor_name or '' }}</div>
+    <div class="col-md-4"><strong>Location ID:</strong> {{ plate_set.location_id }}</div>
+    <div class="col-md-4"><strong>Last Used Date:</strong> {{ plate_usage.last_used_date }}</div>
+    <div class="col-md-4"><strong>Usage Count:</strong> {{ plate_usage.usage_count }}</div>
+    <div class="col-md-4"><strong>Days Since Last Used:</strong> {{ plate_usage.days_since_last_used }}</div>
+    <div class="col-md-4"><strong>Age of Plate:</strong> {{ (date.today() - plate_set.receiving_date).days }}</div>
+    <div class="col-md-4"><strong>Status:</strong> {{ plate_set.status }}</div>
+  </div>
+</div>
+{% endif %}
+<div class="card shadow-sm rounded-4 p-4">
+  <h5>Replacement Plate Records</h5>
+  {% if replacement_rows %}
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead><tr><th>S No.</th><th>Receiving Date</th><th>Colour</th><th>Replacement Plate ID</th><th>Location ID</th><th>Last Used Date</th><th>Usage Count</th><th>Days Since Last Used</th><th>Age</th><th>Status</th><th>Plate from Party</th><th>Vendor Name</th></tr></thead>
+      <tbody>
+        {% for rep, usage in replacement_rows %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>{{ rep.replacement_plate_receiving_date.strftime('%d/%m/%Y') }}</td>
+          <td>{{ rep.colour_of_replacement }}</td>
+          <td>{{ rep.replacement_plate_id }}</td>
+          <td>{{ rep.location_id }}</td>
+          <td>{{ usage.last_used_date }}</td>
+          <td>{{ usage.usage_count }}</td>
+          <td>{{ usage.days_since_last_used }}</td>
+          <td>{{ (date.today() - rep.replacement_plate_receiving_date).days }}</td>
+          <td>{{ rep.status }}</td>
+          <td>{{ rep.plate_from_party }}</td>
+          <td>{{ rep.vendor_name or "" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% elif searched %}
+  <div class="text-muted">No replacement plate records found.</div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,51 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2 class="mb-4">Dashboard</h2>
+{% if current_user.role in ['owner','designer'] %}
+<div class="card rounded-4 shadow-sm mb-4">
+  <div class="card-body">
+    <h5>Notifications</h5>
+    {% if notifications %}
+      <ul class="list-group list-group-flush">
+      {% for note in notifications %}
+        <li class="list-group-item"><strong>{{ note.title }}</strong><br><span class="text-muted">{{ note.message }}</span></li>
+      {% endfor %}
+      </ul>
+    {% else %}
+      <div class="text-muted">No notifications.</div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+<div class="card rounded-4 shadow-sm">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <h5 class="mb-0">Rack Visualization</h5>
+      <form method="get" action="/dashboard" class="d-flex gap-2 align-items-center">
+        <label class="mb-0">Rack No.</label>
+        <select class="form-select" style="width: 120px;" name="rack_no" onchange="this.form.submit()">
+          {% for rack in racks %}
+            <option value="{{ rack }}" {% if rack == rack_no %}selected{% endif %}>{{ rack }}</option>
+          {% endfor %}
+        </select>
+      </form>
+    </div>
+    {% for shelf in ['A','B'] %}
+    <div class="mb-4">
+      <div class="fw-semibold mb-2">Shelf {{ shelf }}</div>
+      <div class="row g-2">
+        {% for n in range(1,7) %}
+          {% set key = shelf ~ n %}
+          <div class="col-md-2 col-6">
+            <div class="rack-cell count-{{ 'high' if rack_data[key] >= 4 else ('mid' if rack_data[key] >= 2 else 'low') }}">
+              <div class="rack-title">{{ key }}</div>
+              <div class="rack-count">{{ rack_data[key] }}</div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

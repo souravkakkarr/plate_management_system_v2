@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2 class="mb-3">Scrap Requests</h2>
+{% if success %}<div class="alert alert-success">{{ success }}</div>{% endif %}
+{% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+<div class="row g-4">
+  <div class="col-lg-6">
+    <div class="card shadow-sm rounded-4 p-4">
+      <h5>Request Scrap Plate Set</h5>
+      <form method="post" action="/scrap-requests/plate-set/search">
+        <label class="form-label">Job ID or Plate Set ID</label>
+        <input class="form-control upper-input mb-3" name="search_value" required>
+        <button class="btn btn-secondary">Search</button>
+      </form>
+      {% if mode == 'plate_set' and plate_set %}
+      <hr>
+      <div class="mb-2"><strong>Job ID:</strong> {{ plate_set.job_id }}</div>
+      <div class="mb-2"><strong>Plate Set ID:</strong> {{ plate_set.plate_set_id }}</div>
+      <div class="mb-2"><strong>Location ID:</strong> {{ plate_set.location_id }}</div>
+      <div class="mb-2"><strong>Status:</strong> {{ plate_set.status }}</div>
+      <form method="post" action="/scrap-requests/plate-set">
+        <input type="hidden" name="plate_set_id" value="{{ plate_set.plate_set_id }}">
+        <label class="form-label mt-2">Reason</label>
+        <textarea class="form-control upper-input mb-3" name="reason"></textarea>
+        <button class="btn btn-warning">Raise Scrap Request</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card shadow-sm rounded-4 p-4">
+      <h5>Request Scrap Replacement Plate</h5>
+      <form method="post" action="/scrap-requests/replacement/search">
+        <label class="form-label">Plate Set ID</label>
+        <input class="form-control upper-input mb-3" name="plate_set_id" required>
+        <button class="btn btn-secondary">Search</button>
+      </form>
+      {% if mode == 'replacement' and replacements %}
+      <hr>
+      {% for rep in replacements %}
+      <div class="border rounded p-3 mb-3">
+        <div><strong>{{ rep.replacement_plate_id }}</strong></div>
+        <div class="small text-muted mb-2">{{ rep.colour_of_replacement }} | {{ rep.status }}</div>
+        <form method="post" action="/scrap-requests/replacement">
+          <input type="hidden" name="replacement_plate_id" value="{{ rep.replacement_plate_id }}">
+          <label class="form-label">Reason</label>
+          <textarea class="form-control upper-input mb-2" name="reason"></textarea>
+          <button class="btn btn-warning btn-sm">Raise Scrap Request</button>
+        </form>
+      </div>
+      {% endfor %}
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

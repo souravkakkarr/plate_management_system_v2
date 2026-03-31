@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2 class="mb-3">Plate Set Master Entry</h2>
+{% if success %}<div class="alert alert-success">{{ success }}</div>{% endif %}
+{% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+<div class="row">
+  <div class="col-lg-8">
+    <form method="post" action="/plate-sets/new" class="card shadow-sm rounded-4 p-4">
+      <h5>Job Details</h5>
+      <div class="row g-3 mb-3">
+        <div class="col-md-4"><label class="form-label">Job ID</label><input class="form-control upper-input" name="job_id" required></div>
+        <div class="col-md-4"><label class="form-label">Job Name</label><input class="form-control upper-input" name="job_name" required></div>
+        <div class="col-md-4"><label class="form-label">Party Name</label><input class="form-control upper-input" name="party_name" required></div>
+      </div>
+      <h5>Plate Set Details</h5>
+      <div class="row g-3 mb-3">
+        <div class="col-md-4"><label class="form-label">Plate Set ID</label><input class="form-control upper-input" name="plate_set_id" required></div>
+        <div class="col-md-4"><label class="form-label">No. of Plates</label><input class="form-control" type="number" name="number_of_plates" required></div>
+        <div class="col-md-4"><label class="form-label">Plate Size</label><select class="form-select upper-input" name="plate_size"><option>770X1080</option><option>790X1080</option></select></div>
+        <div class="col-md-4"><label class="form-label">Gripper Size (mm)</label><input class="form-control" type="number" name="gripper_size_mm" required></div>
+        <div class="col-md-8"><label class="form-label">Color Details / Sequence</label><input class="form-control upper-input" name="color_details" required></div>
+        <div class="col-md-4"><label class="form-label">Plate From Party</label><select class="form-select upper-input" id="plate_from_party_ps" name="plate_from_party"><option>YES</option><option>NO</option></select></div>
+        <div class="col-md-8" id="vendor_wrap_ps" style="display:none;"><label class="form-label">Vendor Name</label><input class="form-control upper-input" id="vendor_name_ps" name="vendor_name"></div>
+        <div class="col-12"><label class="form-label">Remarks</label><textarea class="form-control upper-input" name="remarks"></textarea></div>
+      </div>
+      <h5>Receiving Details</h5>
+      <div class="mb-3"><label class="form-label">Date of Receiving</label><input class="form-control" type="date" name="receiving_date" required></div>
+      <button class="btn btn-primary">Save Plate Set</button>
+    </form>
+  </div>
+  <div class="col-lg-4">
+    <div class="card shadow-sm rounded-4 p-4">
+      <h5>Storage Allocation</h5>
+      <div class="text-muted small mb-3">Auto-assigned from first vacant position.</div>
+      {% if location %}
+      <div class="mb-2"><strong>Location ID:</strong> {{ location.location_id }}</div>
+      <div class="mb-2"><strong>Rack:</strong> {{ location.rack_no }}</div>
+      <div class="mb-2"><strong>Section:</strong> {{ location.section_code }}</div>
+      <div class="mb-2"><strong>Slot:</strong> {{ location.slot_no }}</div>
+      {% else %}
+      <div class="text-danger">No vacant location available.</div>
+      {% endif %}
+      <div class="mt-2"><strong>Status:</strong> ACTIVE</div>
+    </div>
+  </div>
+</div>
+<script>bindPartyToggle('plate_from_party_ps','vendor_wrap_ps','vendor_name_ps');</script>
+{% endblock %}

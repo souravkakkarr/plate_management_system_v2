@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2 class="mb-3">Master Tables</h2>
+<div class="card shadow-sm rounded-4 p-4 mb-4">
+  <h5 class="mb-3">Plate Set Master</h5>
+  <div class="table-responsive">
+    <table class="table table-striped table-bordered align-middle">
+      <thead>
+        <tr>
+          <th>JOB ID</th><th>JOB NAME</th><th>PARTY NAME</th><th>PLATE SET ID</th><th>NO. OF PLATES</th><th>PLATE SIZE</th><th>GRIPPER</th><th>COLOR DETAILS</th><th>PLATE FROM PARTY</th><th>VENDOR NAME</th><th>LOCATION ID</th><th>STATUS</th><th>RECEIVING DATE</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in plate_sets %}
+        <tr>
+          <td>{{ p.job_id }}</td><td>{{ p.job_name }}</td><td>{{ p.party_name }}</td><td>{{ p.plate_set_id }}</td><td>{{ p.number_of_plates }}</td><td>{{ p.plate_size }}</td><td>{{ p.gripper_size_mm }}</td><td>{{ p.color_details }}</td><td>{{ p.plate_from_party }}</td><td>{{ p.vendor_name or '' }}</td><td>{{ p.location_id }}</td><td>{{ p.status }}</td><td>{{ p.receiving_date.strftime('%d/%m/%Y') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<div class="card shadow-sm rounded-4 p-4">
+  <h5 class="mb-3">Replacement Plate Master</h5>
+  <div class="table-responsive">
+    <table class="table table-striped table-bordered align-middle">
+      <thead>
+        <tr>
+          <th>S NO.</th><th>RECEIVING DATE</th><th>JOB ID</th><th>PLATE SET ID</th><th>COLOUR</th><th>REPLACEMENT PLATE ID</th><th>LOCATION ID</th><th>STATUS</th><th>PLATE FROM PARTY</th><th>VENDOR NAME</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in replacements %}
+        <tr>
+          <td>{{ loop.index }}</td><td>{{ r.replacement_plate_receiving_date.strftime('%d/%m/%Y') }}</td><td>{{ r.job_id }}</td><td>{{ r.plate_set_id }}</td><td>{{ r.colour_of_replacement }}</td><td>{{ r.replacement_plate_id }}</td><td>{{ r.location_id }}</td><td>{{ r.status }}</td><td>{{ r.plate_from_party }}</td><td>{{ r.vendor_name or '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
