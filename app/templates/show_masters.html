@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>SHOW MASTERS</h1></div>
+<div class="card">
+  <div class="section-head wrap">
+    <form method="get" class="inline-form"><select name="master" onchange="this.form.submit()"><option value="PLATE_SET_MASTER" {% if master=="PLATE_SET_MASTER" %}selected{% endif %}>PLATE SET MASTER</option><option value="REPLACEMENT_PLATE_MASTER" {% if master=="REPLACEMENT_PLATE_MASTER" %}selected{% endif %}>REPLACEMENT PLATE MASTER</option><option value="LOCATION_MASTER" {% if master=="LOCATION_MASTER" %}selected{% endif %}>LOCATION MASTER</option></select></form>
+    <input id="masterSearch" class="table-search" placeholder="SEARCH ANYTHING..." onkeyup="filterMasterTable()">
+  </div>
+  <div class="table-wrap master-table-wrap"><table id="masterTable"><thead><tr>{% for h in headers %}<th>{{ h }}</th>{% endfor %}</tr></thead><tbody>{% for row in rows %}<tr>{% for c in row %}<td>{{ c }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>
+</div>
+{% endblock %}

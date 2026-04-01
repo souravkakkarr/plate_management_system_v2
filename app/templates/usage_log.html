@@ -1,29 +1,7 @@
-{% extends 'base.html' %}
+{% extends "base.html" %}
 {% block content %}
-<h2 class="mb-3">Usage Log</h2>
-{% if success %}<div class="alert alert-success">{{ success }}</div>{% endif %}
-{% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
-<div class="card shadow-sm rounded-4 p-4 mb-4">
-  <form method="post" action="/usage-log" class="row g-3">
-    <div class="col-md-3"><label class="form-label">Plate Set ID</label><input class="form-control upper-input" name="plate_set_id" required></div>
-    <div class="col-md-2"><label class="form-label">Action</label><select class="form-select upper-input" name="action_type"><option>IN</option><option>OUT</option></select></div>
-    <div class="col-md-2"><label class="form-label">Date</label><input class="form-control" type="date" name="action_date" required></div>
-    <div class="col-md-2"><label class="form-label">Time</label><input class="form-control" type="time" name="action_time" required></div>
-    <div class="col-md-3"><label class="form-label">Remarks</label><input class="form-control upper-input" name="remarks"></div>
-    <div class="col-12"><button class="btn btn-primary">Add Usage Entry</button></div>
-  </form>
-</div>
-<div class="card shadow-sm rounded-4 p-4">
-  <h5>Recent Usage Entries</h5>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead><tr><th>Date</th><th>Time</th><th>Plate Set ID</th><th>Action</th><th>Remarks</th></tr></thead>
-      <tbody>
-        {% for log in logs %}
-        <tr><td>{{ log.action_date.strftime('%d/%m/%Y') }}</td><td>{{ log.action_time }}</td><td>{{ log.plate_set_id }}</td><td>{{ log.action_type }}</td><td>{{ log.remarks or '' }}</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
+<div class="page-head"><h1>USAGE LOG</h1></div>
+<div class="card"><form method="get" class="inline-form"><input name="plate_set_id" value="{{ plate_set_id }}" placeholder="FILTER BY PLATE SET ID"><button class="btn primary" type="submit">FILTER</button></form></div>
+<div class="card"><h2>ADD USAGE ENTRY</h2><form method="post" class="form-grid"><label>Plate Set ID<input name="plate_set_id" required></label><label>Action<select name="action"><option value="IN">IN</option><option value="OUT">OUT</option></select></label><label class="span-2">Remarks<textarea name="remarks" rows="2"></textarea></label><div class="form-span"><button class="btn primary" type="submit">SAVE ENTRY</button></div></form></div>
+<div class="card"><div class="table-wrap"><table><thead><tr><th>DATE</th><th>TIME</th><th>PLATE SET ID</th><th>ACTION</th><th>REMARKS</th></tr></thead><tbody>{% for l in logs %}<tr><td>{{ l.action_date }}</td><td>{{ l.action_time }}</td><td>{{ l.plate_set_id }}</td><td>{{ l.action }}</td><td>{{ l.remarks }}</td></tr>{% endfor %}</tbody></table></div></div>
 {% endblock %}

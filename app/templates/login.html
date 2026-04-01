@@ -1,17 +1,19 @@
-{% extends 'base.html' %}
+{% extends "base.html" %}
 {% block content %}
-<div class="row justify-content-center align-items-center" style="min-height: 85vh;">
-  <div class="col-md-5">
-    <div class="card shadow-sm p-4 rounded-4">
-      <h2 class="mb-3">Plate Management Login</h2>
-      <p class="text-muted">Login using your authorized account.</p>
-      {% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
-      <form method="post" action="/login">
-        <div class="mb-3"><label class="form-label">Email</label><input class="form-control" type="email" name="email" required></div>
-        <div class="mb-3"><label class="form-label">Password</label><input class="form-control" type="password" name="password" required></div>
-        <button class="btn btn-primary w-100">Login</button>
-      </form>
-    </div>
+<div class="auth-wrap">
+  <div class="card auth-card">
+    <h1>LOGIN</h1>
+    <p class="muted">AUTHORIZED ACCESS ONLY</p>
+    {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+    <form method="post" class="form-grid one-col">
+      <label>Email
+        <input type="email" name="email" required autocomplete="username">
+      </label>
+      <label>Password
+        <input type="password" name="password" required autocomplete="current-password">
+      </label>
+      <button class="btn primary" type="submit">LOGIN</button>
+    </form>
   </div>
 </div>
 {% endblock %}

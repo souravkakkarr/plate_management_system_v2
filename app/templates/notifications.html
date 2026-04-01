@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>ALL NOTIFICATIONS</h1></div>
+<div class="card"><div class="scroll-box large-scroll">{% for n in notifications %}<div class="notification-item"><strong>{{ n.title }}</strong><div>{{ n.message }}</div><small>{{ n.created_at }}</small></div>{% endfor %}</div></div>
+{% endblock %}

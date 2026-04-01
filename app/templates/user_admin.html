@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>DATABASE CONTROL - AUTHORIZED USERS</h1></div>
+<div class="card"><div class="table-wrap"><table><thead><tr><th>ROLE</th><th>FULL NAME</th><th>EMAIL / USERNAME</th><th>NEW PASSWORD</th><th>ACTION</th></tr></thead><tbody>{% for u in users %}<tr><form method="post" action="/admin/users/{{ u.id }}"><td>{{ u.role.replace('_',' ') }}</td><td><input name="full_name" value="{{ u.full_name }}"></td><td><input name="email" value="{{ u.email }}"></td><td><input type="password" name="password" placeholder="LEAVE BLANK TO KEEP"></td><td><button class="btn small primary" type="submit">UPDATE</button></td></form></tr>{% endfor %}</tbody></table></div></div>
+{% endblock %}

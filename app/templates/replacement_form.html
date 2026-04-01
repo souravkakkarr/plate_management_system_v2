@@ -1,37 +1,17 @@
-{% extends 'base.html' %}
+{% extends "base.html" %}
 {% block content %}
-<h2 class="mb-3">Replacement Plate Master Entry</h2>
-{% if success %}<div class="alert alert-success">{{ success }}</div>{% endif %}
-{% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
-<div class="row g-4">
-  <div class="col-lg-5">
-    <div class="card shadow-sm rounded-4 p-4">
-      <h5>Fetch Linked Plate Set</h5>
-      <form method="post" action="/replacement-plates/fetch">
-        <label class="form-label">Job ID</label>
-        <input class="form-control upper-input mb-3" name="job_id" required>
-        <button class="btn btn-secondary">Fetch</button>
-      </form>
-    </div>
-  </div>
-  <div class="col-lg-7">
-    <div class="card shadow-sm rounded-4 p-4">
-      <h5>Create Replacement Plate</h5>
-      <form method="post" action="/replacement-plates/new">
-        <div class="row g-3">
-          <div class="col-md-4"><label class="form-label">Job ID</label><input class="form-control upper-input" name="job_id" value="{{ fetched.job_id if fetched else '' }}" required></div>
-          <div class="col-md-4"><label class="form-label">Plate Set ID</label><input class="form-control" value="{{ fetched.plate_set_id if fetched else '' }}" readonly></div>
-          <div class="col-md-4"><label class="form-label">Location ID</label><input class="form-control" value="{{ fetched.location_id if fetched else '' }}" readonly></div>
-          <div class="col-md-6"><label class="form-label">Receiving Date</label><input class="form-control" type="date" name="replacement_plate_receiving_date" required></div>
-          <div class="col-md-6"><label class="form-label">Colour of Replacement</label><select class="form-select upper-input" name="colour_of_replacement"><option>CYAN</option><option>MAGENTA</option><option>YELLOW</option><option>BLACK</option><option>PANTONE</option></select></div>
-          <div class="col-md-6"><label class="form-label">Plate From Party</label><select class="form-select upper-input" id="plate_from_party_rp" name="plate_from_party"><option>YES</option><option>NO</option></select></div>
-          <div class="col-md-6" id="vendor_wrap_rp" style="display:none;"><label class="form-label">Vendor Name</label><input class="form-control upper-input" id="vendor_name_rp" name="vendor_name"></div>
-          <div class="col-md-6"><label class="form-label">Status</label><input class="form-control" value="ACTIVE" readonly></div>
-        </div>
-        <button class="btn btn-primary mt-3">Save Replacement Plate</button>
-      </form>
-    </div>
-  </div>
+<div class="page-head"><h1>REPLACEMENT PLATE MASTER ENTRY</h1></div>
+{% for e in errors %}<div class="alert alert-error">{{ e }}</div>{% endfor %}
+{% if saved %}<div class="modal-lite"><div class="modal-card"><h3>REPLACEMENT PLATE SAVED SUCCESSFULLY</h3><div class="btn-row"><a class="btn primary" href="/dashboard">OK</a><a class="btn" href="/replacement-plates/create">CREATE ANOTHER MASTER</a></div></div></div>{% endif %}
+<div class="card">
+  <form method="post" class="form-grid">
+    <label>Replacement Plate Receiving Date<input name="receiving_date" placeholder="DD/MM/YYYY" required></label>
+    <label>Job ID<input name="job_id" id="replacementJobId" required></label>
+    <div class="form-span auto-preview"><div>Plate Set ID: <strong id="plateSetPreview">-</strong></div><div>Location ID: <strong id="locationPreview">-</strong></div></div>
+    <label>Colour of Replacement<select name="color" required><option value="CYAN">CYAN</option><option value="MAGENTA">MAGENTA</option><option value="YELLOW">YELLOW</option><option value="BLACK">BLACK</option><option value="PANTONE">PANTONE</option></select></label>
+    <label>Plate From Party<select name="plate_from_party" class="party-select" data-target="replacementVendorFields"><option value="YES">YES</option><option value="NO">NO</option></select></label>
+    <div id="replacementVendorFields" class="span-2 conditional-group hidden"><div class="nested-grid"><label>Vendor Name<textarea name="vendor_name" rows="2"></textarea></label><label>Vendor Side Unique Plate ID<input name="vendor_plate_id"></label></div></div>
+    <div class="form-span"><button class="btn primary" type="submit">SAVE REPLACEMENT PLATE</button></div>
+  </form>
 </div>
-<script>bindPartyToggle('plate_from_party_rp','vendor_wrap_rp','vendor_name_rp');</script>
 {% endblock %}
