@@ -1,404 +1,475 @@
-from datetime import datetime, date
-from pathlib import Path
-from fastapi import FastAPI, Request, Form, Depends
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Request, Depends, Form, HTTPException
+from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy.orm import Session
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+from pathlib import Path
 
-from .database import Base, engine, get_db, SessionLocal
-from . import models
-from .auth import verify_password, hash_password, require_permission, get_current_user
-from .services import (
-    create_plate_set,
-    create_replacement_plate,
-    get_plate_set_usage_summary,
-    get_replacement_usage_summary,
-    rack_visualization_data,
-    create_notification,
-    normalize_upper,
+from .db import Base, engine, SessionLocal
+from .models import User, Location, PlateSet, ReplacementPlate, UsageLog, ScrapRequest, Notification
+from .utils import (
+    hash_password, verify_password, now_date, now_time, now_ts, norm,
+    first_free_location, plate_usage_display, replacement_usage_display,
+    plate_age, create_notification,
 )
 
 BASE_DIR = Path(__file__).resolve().parent
-app = FastAPI(title='Plate Management System')
-app.add_middleware(SessionMiddleware, secret_key='replace-this-with-env-secret')
-app.mount('/static', StaticFiles(directory=BASE_DIR / 'static'), name='static')
-templates = Jinja2Templates(directory=str(BASE_DIR / 'templates'))
+templates = Environment(
+    loader=FileSystemLoader(str(BASE_DIR / "templates")),
+    autoescape=select_autoescape(["html", "xml"])
+)
 
-Base.metadata.create_all(bind=engine)
+app = FastAPI(title="Plate Management")
+app.add_middleware(SessionMiddleware, secret_key="CHANGE-THIS-SECRET")
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
+def render_template(name: str, **context):
+    template = templates.get_template(name)
+    return HTMLResponse(template.render(**context))
 
-def seed_data():
+def get_db():
     db = SessionLocal()
     try:
-        if not db.query(models.User).first():
-            users = [
-                ('souravkakkar2k3@gmail.com', 'OWNER', 'owner', 'owner123'),
-                ('souravkakkarr@gmail.com', 'TECHNICAL TEAM', 'technical_team', 'tech123'),
-                ('Designer_of_company@gmail.com', 'DESIGNER', 'designer', 'designer123'),
-                ('Plate_manager_of_company@gmail.com', 'PLATE MANAGER', 'plate_manager', 'plate123'),
-            ]
-            for email, name, role, password in users:
-                db.add(models.User(email=email, full_name=name, role=role, password_hash=hash_password(password), is_active=True))
-            db.commit()
-        if not db.query(models.LocationMaster).first():
-            sort_order = 1
-            for rack in ['R01', 'R02', 'R03']:
-                for section in ['A1','A2','A3','A4','A5','A6','B1','B2','B3','B4','B5','B6']:
-                    shelf_group = section[0]
-                    for slot in range(1, 6):
-                        slot_no = f'{slot:02d}'
-                        location_id = f'{rack}-{section}-{slot_no}'
-                        db.add(models.LocationMaster(
-                            location_id=location_id,
-                            rack_no=rack,
-                            shelf_group=shelf_group,
-                            section_code=section,
-                            slot_no=slot_no,
-                            sort_order=sort_order,
-                        ))
-                        sort_order += 1
-            db.commit()
-        if not db.query(models.PlateSetMaster).first():
-            owner = db.query(models.User).filter_by(role='owner').first()
-            create_plate_set(db, owner.id, {
-                'job_id': 'JOB1001', 'job_name': 'SIDDHI AUTO CARTON', 'party_name': 'SIDDHI PACK',
-                'plate_set_id': 'SIDDHI-CD102-AUTO-001', 'number_of_plates': 4,
-                'plate_size': '770X1080', 'gripper_size_mm': 12, 'color_details': 'C M Y K',
-                'plate_from_party': 'YES', 'vendor_name': None,
-                'remarks': 'DUMMY SEED RECORD', 'receiving_date': date(2026, 3, 20)
-            })
-            create_plate_set(db, owner.id, {
-                'job_id': 'JOB1002', 'job_name': 'MONARCH PHARMA', 'party_name': 'MONARCH',
-                'plate_set_id': 'MONARCH-PHARMA-002', 'number_of_plates': 5,
-                'plate_size': '790X1080', 'gripper_size_mm': 14, 'color_details': 'C M Y K + P',
-                'plate_from_party': 'NO', 'vendor_name': 'GLOBAL PLATES',
-                'remarks': 'DUMMY SEED RECORD', 'receiving_date': date(2026, 3, 22)
-            })
-            create_replacement_plate(db, owner.id, {
-                'job_id': 'JOB1001',
-                'replacement_plate_receiving_date': date(2026, 3, 25),
-                'colour_of_replacement': 'MAGENTA',
-                'plate_from_party': 'YES',
-                'vendor_name': None,
-            })
-            ps1 = db.query(models.PlateSetMaster).filter_by(job_id='JOB1001').first()
-            ps2 = db.query(models.PlateSetMaster).filter_by(job_id='JOB1002').first()
-            db.add_all([
-                models.UsageLog(plate_set_id=ps1.plate_set_id, action_type='OUT', action_date=date(2026,3,26), action_time='10:30:00', remarks='SEED OUT', created_by_user_id=owner.id),
-                models.UsageLog(plate_set_id=ps1.plate_set_id, action_type='IN', action_date=date(2026,3,26), action_time='18:00:00', remarks='SEED IN', created_by_user_id=owner.id),
-                models.UsageLog(plate_set_id=ps2.plate_set_id, action_type='OUT', action_date=date(2026,3,27), action_time='11:00:00', remarks='SEED OUT', created_by_user_id=owner.id),
-            ])
-            db.commit()
+        yield db
     finally:
         db.close()
 
+def current_user(request: Request, db: Session):
+    email = request.session.get("user_email")
+    if not email:
+        return None
+    return db.query(User).filter(User.email == email, User.is_active == "YES").first()
 
-seed_data()
+def require_login(request: Request, db: Session):
+    user = current_user(request, db)
+    if not user:
+        raise HTTPException(status_code=303, headers={"Location": "/login"})
+    return user
 
+def require_roles(user, *roles):
+    if user.role not in roles:
+        raise HTTPException(status_code=403, detail="Not authorized")
 
-def context(request: Request, **kwargs):
-    return {'request': request, 'current_user': get_current_user(request), 'date': date, **kwargs}
+def seed_locations(db: Session):
+    if db.query(Location).first():
+        return
+    for rack in range(1, 11):
+        rack_no = f"R{rack:02d}"
+        for shelf in ["A", "B"]:
+            for slot in range(1, 7):
+                section_code = f"{shelf}{slot}"
+                for pos in range(1, 21):
+                    position_no = f"{pos:02d}"
+                    location_id = f"{rack_no}-{section_code}-{position_no}"
+                    db.add(Location(
+                        location_id=location_id,
+                        rack_no=rack_no,
+                        shelf_code=shelf,
+                        section_code=section_code,
+                        position_no=position_no,
+                        status="FREE"
+                    ))
+    db.commit()
 
+def seed_users(db: Session):
+    fixed = [
+        ("OWNER", "OWNER", "SOURAVKAKKAR2K3@GMAIL.COM", "owner123"),
+        ("TECH_TEAM", "TECH TEAM", "SOURAVKAKKARR@GMAIL.COM", "tech123"),
+        ("DESIGNER", "DESIGNER", "DESIGNER_OF_COMPANY@GMAIL.COM", "designer123"),
+        ("PLATE_MANAGER", "PLATE MANAGER", "PLATE_MANAGER_OF_COMPANY@GMAIL.COM", "plate123"),
+    ]
+    for role, full_name, email, password in fixed:
+        row = db.query(User).filter(User.role == role).first()
+        if not row:
+            db.add(User(
+                role=role,
+                full_name=full_name,
+                email=email,
+                password_hash=hash_password(password),
+                is_active="YES"
+            ))
+    db.commit()
 
-@app.get('/', response_class=HTMLResponse)
-def root(request: Request):
-    if get_current_user(request):
-        return RedirectResponse('/dashboard', status_code=303)
-    return RedirectResponse('/login', status_code=303)
+def seed_notifications(db: Session):
+    if db.query(Notification).first():
+        return
+    owner = db.query(User).filter(User.role=="OWNER").first()
+    designer = db.query(User).filter(User.role=="DESIGNER").first()
+    if owner:
+        create_notification(db, owner.email, "SYSTEM READY", "PLATE MANAGEMENT SYSTEM INITIALIZED.")
+    if designer:
+        create_notification(db, designer.email, "WELCOME", "YOU CAN START CREATING MASTERS NOW.")
 
+@app.on_event("startup")
+def startup():
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    seed_locations(db)
+    seed_users(db)
+    seed_notifications(db)
+    db.close()
 
-@app.get('/login', response_class=HTMLResponse)
-def login_page(request: Request):
-    return templates.TemplateResponse('login.html', context(request))
+def menu_for(role):
+    items = [("Dashboard", "/dashboard"), ("Show Record", "/show-record"), ("Usage Log", "/usage-log")]
+    if role in ("OWNER", "TECH_TEAM", "DESIGNER"):
+        items.insert(1, ("Plate Set Master", "/plate-sets/create"))
+        items.insert(2, ("Replacement Plate Master", "/replacement-plates/create"))
+        items.append(("Show Masters", "/show-masters"))
+    if role in ("OWNER", "DESIGNER"):
+        items.append(("Scrap Request", "/scrap/request"))
+    if role == "OWNER":
+        items.append(("Scrap Approval", "/scrap/approval"))
+    if role in ("OWNER", "TECH_TEAM"):
+        items.append(("Database Control", "/admin/users"))
+    return items
 
+def base_context(request: Request, db: Session, title: str):
+    user = current_user(request, db)
+    return {
+        "request": request,
+        "title": title,
+        "user": user,
+        "menu_items": menu_for(user.role) if user else [],
+        "plate_age": plate_age,
+    }
 
-@app.post('/login')
+@app.get("/")
+def root(request: Request, db: Session = Depends(get_db)):
+    if current_user(request, db):
+        return RedirectResponse("/dashboard", status_code=302)
+    return RedirectResponse("/login", status_code=302)
+
+@app.get("/login")
+def login_page(request: Request, db: Session = Depends(get_db)):
+    return render_template("login.html", **base_context(request, db, "Login"), error=None)
+
+@app.post("/login")
 def login(request: Request, email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.email == email.strip(), models.User.is_active == True).first()
+    email = norm(email)
+    user = db.query(User).filter(User.email == email, User.is_active == "YES").first()
     if not user or not verify_password(password, user.password_hash):
-        return templates.TemplateResponse('login.html', context(request, error='Invalid credentials.'))
-    request.session['user_id'] = user.id
-    return RedirectResponse('/dashboard', status_code=303)
+        return render_template("login.html", **base_context(request, db, "Login"), error="INVALID EMAIL OR PASSWORD.")
+    request.session["user_email"] = user.email
+    return RedirectResponse("/dashboard", status_code=302)
 
-
-@app.get('/logout')
+@app.get("/logout")
 def logout(request: Request):
     request.session.clear()
-    return RedirectResponse('/login', status_code=303)
+    return RedirectResponse("/login", status_code=302)
 
+@app.get("/dashboard")
+def dashboard(request: Request, rack: str = "R01", db: Session = Depends(get_db)):
+    user = require_login(request, db)
+    notes_q = db.query(Notification).filter(Notification.user_email == user.email).order_by(Notification.id.desc())
+    notifications = notes_q.limit(5).all()
+    rack_counts = {}
+    for section in ["A1","A2","A3","A4","A5","A6","B1","B2","B3","B4","B5","B6"]:
+        location_ids = [x.location_id for x in db.query(Location).filter(Location.rack_no == rack, Location.section_code == section).all()]
+        count = db.query(PlateSet).filter(PlateSet.location_id.in_(location_ids), PlateSet.status == "ACTIVE").count() if location_ids else 0
+        rack_counts[section] = count
+    return render_template("dashboard.html", **base_context(request, db, "Dashboard"),
+                          rack=rack, racks=[f"R{i:02d}" for i in range(1,11)],
+                          notifications=notifications, rack_counts=rack_counts)
 
-@app.get('/dashboard', response_class=HTMLResponse)
-def dashboard(request: Request, rack_no: str = 'R01', db: Session = Depends(get_db)):
-    user = require_permission(request, 'view_dashboard')
-    notifications = []
-    if user.role in {'owner', 'designer'}:
-        notifications = db.query(models.Notification).filter(models.Notification.user_id == user.id).order_by(models.Notification.created_at.desc()).limit(10).all()
-    rack_data = rack_visualization_data(db, rack_no)
-    racks = [r[0] for r in db.query(models.LocationMaster.rack_no).distinct().order_by(models.LocationMaster.rack_no).all()]
-    return templates.TemplateResponse('dashboard.html', context(request, rack_data=rack_data, rack_no=rack_no, racks=racks, notifications=notifications))
+@app.get("/notifications")
+def all_notifications(request: Request, db: Session = Depends(get_db)):
+    user = require_login(request, db)
+    notes = db.query(Notification).filter(Notification.user_email == user.email).order_by(Notification.id.desc()).all()
+    return render_template("notifications.html", **base_context(request, db, "Notifications"), notifications=notes)
 
-
-@app.get('/plate-sets/new', response_class=HTMLResponse)
+@app.get("/plate-sets/create")
 def plate_set_form(request: Request, db: Session = Depends(get_db)):
-    require_permission(request, 'create_plate_set')
-    from .services import get_first_vacant_location
-    location = get_first_vacant_location(db)
-    return templates.TemplateResponse('plate_set_form.html', context(request, location=location, success=None, error=None))
+    user = require_login(request, db)
+    require_roles(user, "OWNER", "TECH_TEAM", "DESIGNER")
+    location = first_free_location(db)
+    return render_template("plate_set_form.html", **base_context(request, db, "Create Plate Set"), next_location=location.location_id if location else "NO FREE LOCATION", saved=None, errors=[])
 
-
-@app.post('/plate-sets/new', response_class=HTMLResponse)
+@app.post("/plate-sets/create")
 def plate_set_create(
     request: Request,
+    receiving_date: str = Form(...),
     job_id: str = Form(...),
     job_name: str = Form(...),
     party_name: str = Form(...),
     plate_set_id: str = Form(...),
-    number_of_plates: int = Form(...),
+    no_of_plates: int = Form(...),
     plate_size: str = Form(...),
     gripper_size_mm: int = Form(...),
     color_details: str = Form(...),
+    remarks: str = Form(""),
     plate_from_party: str = Form(...),
-    vendor_name: str = Form(''),
-    remarks: str = Form(''),
-    receiving_date: str = Form(...),
+    vendor_name: str = Form(""),
+    vendor_plate_id: str = Form(""),
     db: Session = Depends(get_db),
 ):
-    user = require_permission(request, 'create_plate_set')
-    from .services import get_first_vacant_location
-    try:
-        plate_set = create_plate_set(db, user.id, {
-            'job_id': job_id,
-            'job_name': job_name,
-            'party_name': party_name,
-            'plate_set_id': plate_set_id,
-            'number_of_plates': number_of_plates,
-            'plate_size': plate_size,
-            'gripper_size_mm': gripper_size_mm,
-            'color_details': color_details,
-            'plate_from_party': plate_from_party,
-            'vendor_name': vendor_name,
-            'remarks': remarks,
-            'receiving_date': datetime.strptime(receiving_date, '%Y-%m-%d').date(),
-        })
-        location = db.query(models.LocationMaster).filter_by(location_id=plate_set.location_id).first()
-        return templates.TemplateResponse('plate_set_form.html', context(request, location=location, success=f'Plate Set created successfully. Assigned location: {plate_set.location_id}', error=None))
-    except Exception as exc:
-        location = get_first_vacant_location(db)
-        return templates.TemplateResponse('plate_set_form.html', context(request, location=location, error=str(exc), success=None))
+    user = require_login(request, db)
+    require_roles(user, "OWNER", "TECH_TEAM", "DESIGNER")
+    errors = []
+    receiving_date = norm(receiving_date)
+    job_id = norm(job_id)
+    job_name = norm(job_name)
+    party_name = norm(party_name)
+    plate_set_id = norm(plate_set_id)
+    color_details = norm(color_details)
+    remarks = norm(remarks)
+    plate_from_party = norm(plate_from_party)
+    vendor_name = norm(vendor_name)
+    vendor_plate_id = norm(vendor_plate_id)
+    plate_size = norm(plate_size)
 
+    if db.query(PlateSet).filter(PlateSet.job_id == job_id).first():
+        errors.append("JOB ID ALREADY EXISTS.")
+    if db.query(PlateSet).filter(PlateSet.plate_set_id == plate_set_id).first():
+        errors.append("PLATE SET ID ALREADY EXISTS.")
+    if plate_from_party == "NO" and not vendor_name:
+        errors.append("VENDOR NAME IS REQUIRED WHEN PLATE FROM PARTY IS NO.")
+    if plate_size not in ("770X1080", "790X1080"):
+        errors.append("INVALID PLATE SIZE.")
+    location = first_free_location(db)
+    if not location:
+        errors.append("NO FREE LOCATION AVAILABLE.")
+    if errors:
+        return render_template("plate_set_form.html", **base_context(request, db, "Create Plate Set"), next_location=location.location_id if location else "NO FREE LOCATION", saved=None, errors=errors)
 
-@app.get('/replacement-plates/new', response_class=HTMLResponse)
-def replacement_form(request: Request):
-    require_permission(request, 'create_replacement_plate')
-    return templates.TemplateResponse('replacement_form.html', context(request, fetched=None, success=None, error=None))
-
-
-@app.post('/replacement-plates/fetch', response_class=HTMLResponse)
-def replacement_fetch(request: Request, job_id: str = Form(...), db: Session = Depends(get_db)):
-    require_permission(request, 'create_replacement_plate')
-    plate_set = db.query(models.PlateSetMaster).filter_by(job_id=normalize_upper(job_id)).first()
-    if not plate_set:
-        return templates.TemplateResponse('replacement_form.html', context(request, fetched=None, error='No plate set found for this Job ID.', success=None))
-    return templates.TemplateResponse('replacement_form.html', context(request, fetched=plate_set, error=None, success=None))
-
-
-@app.post('/replacement-plates/new', response_class=HTMLResponse)
-def replacement_create(
-    request: Request,
-    job_id: str = Form(...),
-    replacement_plate_receiving_date: str = Form(...),
-    colour_of_replacement: str = Form(...),
-    plate_from_party: str = Form(...),
-    vendor_name: str = Form(''),
-    db: Session = Depends(get_db),
-):
-    user = require_permission(request, 'create_replacement_plate')
-    plate_set = db.query(models.PlateSetMaster).filter_by(job_id=normalize_upper(job_id)).first()
-    try:
-        replacement = create_replacement_plate(db, user.id, {
-            'job_id': job_id,
-            'replacement_plate_receiving_date': datetime.strptime(replacement_plate_receiving_date, '%Y-%m-%d').date(),
-            'colour_of_replacement': colour_of_replacement,
-            'plate_from_party': plate_from_party,
-            'vendor_name': vendor_name,
-        })
-        return templates.TemplateResponse('replacement_form.html', context(request, fetched=plate_set, success=f'Replacement Plate created: {replacement.replacement_plate_id}', error=None))
-    except Exception as exc:
-        return templates.TemplateResponse('replacement_form.html', context(request, fetched=plate_set, error=str(exc), success=None))
-
-
-@app.get('/records', response_class=HTMLResponse)
-def records_page(request: Request):
-    require_permission(request, 'view_records')
-    return templates.TemplateResponse('records.html', context(request, plate_set=None, replacement_rows=[], searched=False))
-
-
-@app.post('/records', response_class=HTMLResponse)
-def records_search(request: Request, job_id: str = Form(...), db: Session = Depends(get_db)):
-    require_permission(request, 'view_records')
-    search_id = normalize_upper(job_id)
-    plate_set = db.query(models.PlateSetMaster).filter_by(job_id=search_id).first()
-    replacements = db.query(models.ReplacementPlateMaster).filter_by(job_id=search_id).order_by(models.ReplacementPlateMaster.id).all()
-    plate_usage = get_plate_set_usage_summary(db, plate_set.plate_set_id) if plate_set else None
-    replacement_rows = []
-    for rep in replacements:
-        usage = get_replacement_usage_summary(db, rep)
-        replacement_rows.append((rep, usage))
-    return templates.TemplateResponse('records.html', context(request, plate_set=plate_set, plate_usage=plate_usage, replacement_rows=replacement_rows, searched=True, searched_job_id=search_id))
-
-
-@app.get('/usage-log', response_class=HTMLResponse)
-def usage_log_page(request: Request, db: Session = Depends(get_db)):
-    require_permission(request, 'use_usage_log')
-    logs = db.query(models.UsageLog).order_by(models.UsageLog.created_at.desc()).limit(50).all()
-    return templates.TemplateResponse('usage_log.html', context(request, logs=logs, success=None, error=None))
-
-
-@app.post('/usage-log', response_class=HTMLResponse)
-def usage_log_create(
-    request: Request,
-    plate_set_id: str = Form(...),
-    action_type: str = Form(...),
-    action_date: str = Form(...),
-    action_time: str = Form(...),
-    remarks: str = Form(''),
-    db: Session = Depends(get_db),
-):
-    user = require_permission(request, 'use_usage_log')
-    normalized_plate_set = normalize_upper(plate_set_id)
-    plate_set = db.query(models.PlateSetMaster).filter_by(plate_set_id=normalized_plate_set).first()
-    if not plate_set:
-        logs = db.query(models.UsageLog).order_by(models.UsageLog.created_at.desc()).limit(50).all()
-        return templates.TemplateResponse('usage_log.html', context(request, logs=logs, error='Plate Set ID not found.', success=None))
-    db.add(models.UsageLog(
-        plate_set_id=plate_set.plate_set_id,
-        action_type=normalize_upper(action_type),
-        action_date=datetime.strptime(action_date, '%Y-%m-%d').date(),
-        action_time=action_time,
-        remarks=normalize_upper(remarks),
-        created_by_user_id=user.id,
-    ))
+    row = PlateSet(
+        receiving_date=receiving_date,
+        job_id=job_id,
+        job_name=job_name,
+        party_name=party_name,
+        plate_set_id=plate_set_id,
+        no_of_plates=no_of_plates,
+        plate_size=plate_size,
+        gripper_size_mm=gripper_size_mm,
+        color_details=color_details,
+        remarks=remarks,
+        plate_from_party=plate_from_party,
+        vendor_name=vendor_name if plate_from_party == "NO" else None,
+        vendor_plate_id=vendor_plate_id if plate_from_party == "NO" else None,
+        location_id=location.location_id,
+        status="ACTIVE",
+        created_at=now_ts(),
+    )
+    db.add(row)
+    location.status = "OCCUPIED"
+    db.add(UsageLog(action_date=receiving_date, action_time=now_time(), plate_set_id=plate_set_id, action="IN", remarks="AUTO ENTRY ON MASTER CREATION"))
     db.commit()
-    logs = db.query(models.UsageLog).order_by(models.UsageLog.created_at.desc()).limit(50).all()
-    return templates.TemplateResponse('usage_log.html', context(request, logs=logs, success='Usage log added.', error=None))
+    create_notification(db, user.email, "PLATE SET SAVED", f"PLATE SET {plate_set_id} WAS SAVED SUCCESSFULLY.")
+    next_loc = first_free_location(db)
+    return render_template("plate_set_form.html", **base_context(request, db, "Create Plate Set"), next_location=next_loc.location_id if next_loc else "NO FREE LOCATION", saved=plate_set_id, errors=[])
 
+def color_code(color):
+    mapping = {"CYAN":"CYAN","MAGENTA":"MGNT","YELLOW":"YLLW","BLACK":"BLCK","PANTONE":"PNTN"}
+    return mapping.get(color, color[:4])
 
-@app.get('/scrap-requests', response_class=HTMLResponse)
-def scrap_request_page(request: Request):
-    require_permission(request, 'raise_scrap_request')
-    return templates.TemplateResponse('scrap_requests.html', context(request, plate_set=None, replacements=[], success=None, error=None, mode=None))
+@app.get("/api/plate-context")
+def api_plate_context(job_id: str, db: Session = Depends(get_db)):
+    job_id = norm(job_id)
+    plate = db.query(PlateSet).filter(PlateSet.job_id == job_id).first()
+    if not plate:
+        return {"found": False}
+    return {"found": True, "plate_set_id": plate.plate_set_id, "location_id": plate.location_id}
 
+@app.get("/replacement-plates/create")
+def replacement_form(request: Request, db: Session = Depends(get_db)):
+    user = require_login(request, db)
+    require_roles(user, "OWNER", "TECH_TEAM", "DESIGNER")
+    return render_template("replacement_form.html", **base_context(request, db, "Create Replacement Plate"), saved=None, errors=[])
 
-@app.post('/scrap-requests/plate-set/search', response_class=HTMLResponse)
-def scrap_plate_set_search(request: Request, search_value: str = Form(...), db: Session = Depends(get_db)):
-    require_permission(request, 'raise_scrap_request')
-    sv = normalize_upper(search_value)
-    plate_set = db.query(models.PlateSetMaster).filter(
-        (models.PlateSetMaster.job_id == sv) | (models.PlateSetMaster.plate_set_id == sv)
-    ).first()
-    return templates.TemplateResponse('scrap_requests.html', context(request, plate_set=plate_set, replacements=[], mode='plate_set', error=None if plate_set else 'No plate set found.', success=None))
+@app.post("/replacement-plates/create")
+def replacement_create(request: Request, receiving_date: str = Form(...), job_id: str = Form(...), color: str = Form(...), plate_from_party: str = Form(...), vendor_name: str = Form(""), vendor_plate_id: str = Form(""), db: Session = Depends(get_db)):
+    user = require_login(request, db)
+    require_roles(user, "OWNER", "TECH_TEAM", "DESIGNER")
+    errors = []
+    receiving_date = norm(receiving_date)
+    job_id = norm(job_id)
+    color = norm(color)
+    plate_from_party = norm(plate_from_party)
+    vendor_name = norm(vendor_name)
+    vendor_plate_id = norm(vendor_plate_id)
 
+    plate = db.query(PlateSet).filter(PlateSet.job_id == job_id, PlateSet.status == "ACTIVE").first()
+    if not plate:
+        errors.append("JOB ID NOT FOUND IN ACTIVE PLATE SET MASTER.")
+    if plate_from_party == "NO" and not vendor_name:
+        errors.append("VENDOR NAME IS REQUIRED WHEN PLATE FROM PARTY IS NO.")
+    if errors:
+        return render_template("replacement_form.html", **base_context(request, db, "Create Replacement Plate"), saved=None, errors=errors)
 
-@app.post('/scrap-requests/plate-set', response_class=HTMLResponse)
-def scrap_plate_set_request(request: Request, plate_set_id: str = Form(...), reason: str = Form(''), db: Session = Depends(get_db)):
-    user = require_permission(request, 'raise_scrap_request')
-    psid = normalize_upper(plate_set_id)
-    plate_set = db.query(models.PlateSetMaster).filter_by(plate_set_id=psid).first()
-    if not plate_set:
-        return templates.TemplateResponse('scrap_requests.html', context(request, plate_set=None, replacements=[], mode='plate_set', error='Plate set not found.', success=None))
-    sr = models.ScrapRequest(request_type='plate_set', target_plate_set_id=plate_set.plate_set_id, target_job_id=plate_set.job_id, requested_by_user_id=user.id, request_reason=normalize_upper(reason))
-    db.add(sr)
-    db.flush()
-    owner = db.query(models.User).filter_by(role='owner').first()
-    create_notification(db, owner.id, 'New Plate Set Scrap Request', f'Plate Set {plate_set.plate_set_id} requested for scrap by {user.email}', 'scrap')
-    create_notification(db, user.id, 'Scrap Request Submitted', f'Your plate set scrap request for {plate_set.plate_set_id} has been submitted.', 'scrap')
+    replacement_plate_id = f"{plate.plate_set_id}-{color_code(color)}-{receiving_date.replace('/','')}"
+    if db.query(ReplacementPlate).filter(ReplacementPlate.replacement_plate_id == replacement_plate_id).first():
+        errors.append("REPLACEMENT PLATE ID ALREADY EXISTS.")
+        return render_template("replacement_form.html", **base_context(request, db, "Create Replacement Plate"), saved=None, errors=errors)
+
+    row = ReplacementPlate(receiving_date=receiving_date, job_id=job_id, plate_set_id=plate.plate_set_id, color=color, replacement_plate_id=replacement_plate_id, location_id=plate.location_id, plate_from_party=plate_from_party, vendor_name=vendor_name if plate_from_party == "NO" else None, vendor_plate_id=vendor_plate_id if plate_from_party == "NO" else None, status="ACTIVE", created_at=now_ts())
+    db.add(row)
     db.commit()
-    return templates.TemplateResponse('scrap_requests.html', context(request, plate_set=plate_set, replacements=[], mode='plate_set', success='Scrap request submitted.', error=None))
+    create_notification(db, user.email, "REPLACEMENT SAVED", f"REPLACEMENT {replacement_plate_id} WAS SAVED SUCCESSFULLY.")
+    return render_template("replacement_form.html", **base_context(request, db, "Create Replacement Plate"), saved=replacement_plate_id, errors=[])
 
+@app.get("/show-record")
+def show_record(request: Request, job_id: str = "", db: Session = Depends(get_db)):
+    user = require_login(request, db)
+    job_id = norm(job_id)
+    plate = db.query(PlateSet).filter(PlateSet.job_id == job_id).first() if job_id else None
+    replacements = db.query(ReplacementPlate).filter(ReplacementPlate.job_id == job_id).order_by(ReplacementPlate.id.desc()).all() if job_id else []
+    plate_stats = plate_usage_display(db, plate.plate_set_id) if plate else None
+    repl_rows = []
+    for r in replacements:
+        s = replacement_usage_display(db, r)
+        repl_rows.append((r, s))
+    return render_template("show_record.html", **base_context(request, db, "Show Record"), query=job_id, plate=plate, plate_stats=plate_stats, replacements=repl_rows)
 
-@app.post('/scrap-requests/replacement/search', response_class=HTMLResponse)
-def scrap_replacement_search(request: Request, plate_set_id: str = Form(...), db: Session = Depends(get_db)):
-    require_permission(request, 'raise_scrap_request')
-    replacements = db.query(models.ReplacementPlateMaster).filter_by(plate_set_id=normalize_upper(plate_set_id)).all()
-    return templates.TemplateResponse('scrap_requests.html', context(request, plate_set=None, replacements=replacements, mode='replacement', error=None if replacements else 'No replacement plates found for this Plate Set ID.', success=None, selected_plate_set_id=normalize_upper(plate_set_id)))
+@app.get("/show-masters")
+def show_masters(request: Request, master: str = "PLATE_SET_MASTER", db: Session = Depends(get_db)):
+    user = require_login(request, db)
+    require_roles(user, "OWNER", "TECH_TEAM", "DESIGNER")
+    master = norm(master)
+    headers, rows = [], []
+    if master == "PLATE_SET_MASTER":
+        headers = ["RECEIVING DATE","JOB ID","JOB NAME","PARTY NAME","PLATE SET ID","NO. OF PLATES","PLATE SIZE","GRIPPER SIZE MM","COLOR DETAILS","REMARKS","PLATE FROM PARTY","VENDOR NAME","VENDOR PLATE ID","LOCATION ID","LAST USED DATE","USAGE COUNT","DAYS SINCE LAST USED","AGE OF PLATE","STATUS"]
+        data = db.query(PlateSet).order_by(PlateSet.id.desc()).all()
+        for p in data:
+            s = plate_usage_display(db, p.plate_set_id)
+            rows.append([p.receiving_date,p.job_id,p.job_name,p.party_name,p.plate_set_id,p.no_of_plates,p.plate_size,p.gripper_size_mm,p.color_details,p.remarks or "",p.plate_from_party,p.vendor_name or "",p.vendor_plate_id or "",p.location_id,s["last_used_date"],s["usage_count"],s["days_since_last_used"],plate_age(p.receiving_date),p.status])
+    elif master == "REPLACEMENT_PLATE_MASTER":
+        headers = ["RECEIVING DATE","JOB ID","PLATE SET ID","COLOUR OF REPLACEMENT","REPLACEMENT PLATE ID","LOCATION ID","PLATE FROM PARTY","VENDOR NAME","VENDOR PLATE ID","LAST USED DATE","USAGE COUNT","DAYS SINCE LAST USED","AGE OF PLATE","STATUS"]
+        data = db.query(ReplacementPlate).order_by(ReplacementPlate.id.desc()).all()
+        for r in data:
+            s = replacement_usage_display(db, r)
+            rows.append([r.receiving_date,r.job_id,r.plate_set_id,r.color,r.replacement_plate_id,r.location_id,r.plate_from_party,r.vendor_name or "",r.vendor_plate_id or "",s["last_used_date"],s["usage_count"],s["days_since_last_used"],plate_age(r.receiving_date),r.status])
+    else:
+        master = "LOCATION_MASTER"
+        headers = ["LOCATION ID","RACK NO","SHELF","SECTION","POSITION","STATUS"]
+        data = db.query(Location).order_by(Location.id.asc()).all()
+        for l in data:
+            rows.append([l.location_id,l.rack_no,l.shelf_code,l.section_code,l.position_no,l.status])
+    return render_template("show_masters.html", **base_context(request, db, "Show Masters"), master=master, headers=headers, rows=rows)
 
+@app.get("/usage-log")
+def usage_log(request: Request, plate_set_id: str = "", db: Session = Depends(get_db)):
+    user = require_login(request, db)
+    plate_set_id = norm(plate_set_id)
+    q = db.query(UsageLog)
+    if plate_set_id:
+        q = q.filter(UsageLog.plate_set_id == plate_set_id)
+    logs = q.order_by(UsageLog.id.desc()).all()
+    return render_template("usage_log.html", **base_context(request, db, "Usage Log"), logs=logs, plate_set_id=plate_set_id)
 
-@app.post('/scrap-requests/replacement', response_class=HTMLResponse)
-def scrap_replacement_request(request: Request, replacement_plate_id: str = Form(...), reason: str = Form(''), db: Session = Depends(get_db)):
-    user = require_permission(request, 'raise_scrap_request')
-    replacement = db.query(models.ReplacementPlateMaster).filter_by(replacement_plate_id=normalize_upper(replacement_plate_id)).first()
-    if not replacement:
-        return templates.TemplateResponse('scrap_requests.html', context(request, plate_set=None, replacements=[], mode='replacement', error='Replacement plate not found.', success=None))
-    db.add(models.ScrapRequest(request_type='replacement_plate', target_plate_set_id=replacement.plate_set_id, target_replacement_plate_id=replacement.replacement_plate_id, target_job_id=replacement.job_id, requested_by_user_id=user.id, request_reason=normalize_upper(reason)))
-    owner = db.query(models.User).filter_by(role='owner').first()
-    create_notification(db, owner.id, 'New Replacement Scrap Request', f'Replacement Plate {replacement.replacement_plate_id} requested for scrap by {user.email}', 'scrap')
-    create_notification(db, user.id, 'Scrap Request Submitted', f'Your replacement plate scrap request for {replacement.replacement_plate_id} has been submitted.', 'scrap')
+@app.post("/usage-log")
+def usage_log_create(request: Request, plate_set_id: str = Form(...), action: str = Form(...), remarks: str = Form(""), db: Session = Depends(get_db)):
+    user = require_login(request, db)
+    plate_set_id = norm(plate_set_id)
+    action = norm(action)
+    remarks = norm(remarks)
+    plate = db.query(PlateSet).filter(PlateSet.plate_set_id == plate_set_id, PlateSet.status == "ACTIVE").first()
+    if not plate:
+        return RedirectResponse("/usage-log?plate_set_id=" + plate_set_id, status_code=302)
+    db.add(UsageLog(action_date=now_date(), action_time=now_time(), plate_set_id=plate_set_id, action=action, remarks=remarks))
     db.commit()
-    replacements = db.query(models.ReplacementPlateMaster).filter_by(plate_set_id=replacement.plate_set_id).all()
-    return templates.TemplateResponse('scrap_requests.html', context(request, plate_set=None, replacements=replacements, mode='replacement', selected_plate_set_id=replacement.plate_set_id, success='Scrap request submitted.', error=None))
+    return RedirectResponse("/usage-log?plate_set_id=" + plate_set_id, status_code=302)
 
+@app.get("/scrap/request")
+def scrap_request_page(request: Request, plate_set_id: str = "", db: Session = Depends(get_db)):
+    user = require_login(request, db)
+    require_roles(user, "OWNER", "DESIGNER")
+    plate_set_id = norm(plate_set_id)
+    repls = db.query(ReplacementPlate).filter(ReplacementPlate.plate_set_id == plate_set_id, ReplacementPlate.status == "ACTIVE").all() if plate_set_id else []
+    return render_template("scrap_request.html", **base_context(request, db, "Scrap Request"), replacements=repls, plate_set_id=plate_set_id)
 
-@app.get('/scrap-approval', response_class=HTMLResponse)
-def scrap_approval_page(request: Request, db: Session = Depends(get_db)):
-    require_permission(request, 'approve_scrap_request')
-    pending = db.query(models.ScrapRequest).filter_by(request_status='Pending').order_by(models.ScrapRequest.requested_at.desc()).all()
-    return templates.TemplateResponse('scrap_approval.html', context(request, pending=pending))
+@app.post("/scrap/request/plate-set")
+def scrap_request_plate_set(request: Request, identifier: str = Form(...), reason: str = Form(""), db: Session = Depends(get_db)):
+    user = require_login(request, db)
+    require_roles(user, "OWNER", "DESIGNER")
+    ident = norm(identifier)
+    reason = norm(reason)
+    plate = db.query(PlateSet).filter((PlateSet.job_id == ident) | (PlateSet.plate_set_id == ident)).first()
+    if not plate:
+        return RedirectResponse("/scrap/request", status_code=302)
+    db.add(ScrapRequest(request_type="PLATE_SET", target_job_id=plate.job_id, target_plate_set_id=plate.plate_set_id, requested_by_email=user.email, reason=reason, status="PENDING", created_at=now_ts()))
+    db.commit()
+    owner = db.query(User).filter(User.role == "OWNER").first()
+    if owner:
+        create_notification(db, owner.email, "NEW SCRAP REQUEST", f"PLATE SET SCRAP REQUEST RECEIVED FOR {plate.plate_set_id}.")
+    create_notification(db, user.email, "REQUEST SUBMITTED", f"YOUR SCRAP REQUEST FOR {plate.plate_set_id} HAS BEEN SUBMITTED.")
+    return RedirectResponse("/scrap/request", status_code=302)
 
+@app.post("/scrap/request/replacement")
+def scrap_request_replacement(request: Request, plate_set_id: str = Form(...), replacement_plate_id: str = Form(...), reason: str = Form(""), db: Session = Depends(get_db)):
+    user = require_login(request, db)
+    require_roles(user, "OWNER", "DESIGNER")
+    plate_set_id = norm(plate_set_id)
+    replacement_plate_id = norm(replacement_plate_id)
+    reason = norm(reason)
+    db.add(ScrapRequest(request_type="REPLACEMENT", target_plate_set_id=plate_set_id, target_replacement_plate_id=replacement_plate_id, requested_by_email=user.email, reason=reason, status="PENDING", created_at=now_ts()))
+    db.commit()
+    owner = db.query(User).filter(User.role == "OWNER").first()
+    if owner:
+        create_notification(db, owner.email, "NEW SCRAP REQUEST", f"REPLACEMENT SCRAP REQUEST RECEIVED FOR {replacement_plate_id}.")
+    create_notification(db, user.email, "REQUEST SUBMITTED", f"YOUR SCRAP REQUEST FOR {replacement_plate_id} HAS BEEN SUBMITTED.")
+    return RedirectResponse(f"/scrap/request?plate_set_id={plate_set_id}", status_code=302)
 
-@app.post('/scrap-approval/{request_id}/{decision}', response_class=HTMLResponse)
-def scrap_decide(request_id: int, decision: str, request: Request, note: str = Form(''), db: Session = Depends(get_db)):
-    user = require_permission(request, 'approve_scrap_request')
-    sr = db.query(models.ScrapRequest).filter_by(id=request_id).first()
-    if sr and sr.request_status == 'Pending':
-        sr.request_status = 'Approved' if decision == 'approve' else 'Rejected'
-        sr.approved_by_user_id = user.id
-        sr.decision_note = note
-        sr.decided_at = datetime.now()
-        if decision == 'approve':
-            if sr.request_type == 'plate_set':
-                plate_set = db.query(models.PlateSetMaster).filter_by(plate_set_id=sr.target_plate_set_id).first()
-                if plate_set:
-                    plate_set.status = 'SCRAPPED'
-            else:
-                replacement = db.query(models.ReplacementPlateMaster).filter_by(replacement_plate_id=sr.target_replacement_plate_id).first()
-                if replacement:
-                    replacement.status = 'SCRAPPED'
-        create_notification(db, sr.requested_by_user_id, f'Scrap Request {sr.request_status}', f'Your {sr.request_type} scrap request has been {sr.request_status.lower()}.', 'scrap')
+@app.get("/scrap/approval")
+def scrap_approval(request: Request, db: Session = Depends(get_db)):
+    user = require_login(request, db)
+    require_roles(user, "OWNER")
+    pending = db.query(ScrapRequest).order_by(ScrapRequest.id.desc()).all()
+    return render_template("scrap_approval.html", **base_context(request, db, "Scrap Approval"), requests=pending)
+
+@app.post("/scrap/approval/{request_id}/approve")
+def approve_scrap(request_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_login(request, db)
+    require_roles(user, "OWNER")
+    req = db.query(ScrapRequest).filter(ScrapRequest.id == request_id, ScrapRequest.status == "PENDING").first()
+    if req:
+        if req.request_type == "PLATE_SET":
+            plate = db.query(PlateSet).filter(PlateSet.plate_set_id == req.target_plate_set_id).first()
+            if plate:
+                plate.status = "SCRAPPED"
+                loc = db.query(Location).filter(Location.location_id == plate.location_id).first()
+                if loc:
+                    loc.status = "FREE"
+                replacements = db.query(ReplacementPlate).filter(ReplacementPlate.plate_set_id == plate.plate_set_id).all()
+                for r in replacements:
+                    r.status = "SCRAPPED"
+        elif req.request_type == "REPLACEMENT":
+            repl = db.query(ReplacementPlate).filter(ReplacementPlate.replacement_plate_id == req.target_replacement_plate_id).first()
+            if repl:
+                repl.status = "SCRAPPED"
+        req.status = "APPROVED"
+        req.decided_at = now_ts()
         db.commit()
-    return RedirectResponse('/scrap-approval', status_code=303)
+        create_notification(db, req.requested_by_email, "REQUEST APPROVED", f"YOUR SCRAP REQUEST HAS BEEN APPROVED.")
+    return RedirectResponse("/scrap/approval", status_code=302)
 
+@app.post("/scrap/approval/{request_id}/reject")
+def reject_scrap(request_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_login(request, db)
+    require_roles(user, "OWNER")
+    req = db.query(ScrapRequest).filter(ScrapRequest.id == request_id, ScrapRequest.status == "PENDING").first()
+    if req:
+        req.status = "REJECTED"
+        req.decided_at = now_ts()
+        db.commit()
+        create_notification(db, req.requested_by_email, "REQUEST REJECTED", f"YOUR SCRAP REQUEST HAS BEEN REJECTED.")
+    return RedirectResponse("/scrap/approval", status_code=302)
 
-@app.get('/database-control', response_class=HTMLResponse)
-def database_control(request: Request, db: Session = Depends(get_db), success: str | None = None, error: str | None = None):
-    require_permission(request, 'database_control')
-    users = db.query(models.User).order_by(models.User.id).all()
-    plate_sets = db.query(models.PlateSetMaster).order_by(models.PlateSetMaster.id.desc()).limit(20).all()
-    replacements = db.query(models.ReplacementPlateMaster).order_by(models.ReplacementPlateMaster.id.desc()).limit(20).all()
-    return templates.TemplateResponse('database_control.html', context(request, users=users, plate_sets=plate_sets, replacements=replacements, success=success, error=error))
+@app.get("/admin/users")
+def user_admin(request: Request, db: Session = Depends(get_db)):
+    user = require_login(request, db)
+    require_roles(user, "OWNER", "TECH_TEAM")
+    users = db.query(User).order_by(User.id.asc()).all()
+    return render_template("user_admin.html", **base_context(request, db, "Database Control"), users=users)
 
-
-@app.post('/database-control/users/{user_id}', response_class=HTMLResponse)
-def update_user(user_id: int, request: Request, full_name: str = Form(...), email: str = Form(...), db: Session = Depends(get_db)):
-    require_permission(request, 'database_control')
-    user = db.query(models.User).filter_by(id=user_id).first()
-    if not user:
-        return database_control(request, db, error='User not found.')
-    normalized_email = email.strip()
-    normalized_name = normalize_upper(full_name)
-    existing = db.query(models.User).filter(models.User.email == normalized_email, models.User.id != user_id).first()
-    if existing:
-        return database_control(request, db, error='Email already exists for another authorized user.')
-    user.email = normalized_email
-    user.full_name = normalized_name
-    db.commit()
-    return database_control(request, db, success='Authorized user updated successfully.')
-
-
-@app.get('/master-tables', response_class=HTMLResponse)
-def master_tables(request: Request, db: Session = Depends(get_db)):
-    require_permission(request, 'view_master_tables')
-    plate_sets = db.query(models.PlateSetMaster).order_by(models.PlateSetMaster.id.desc()).all()
-    replacements = db.query(models.ReplacementPlateMaster).order_by(models.ReplacementPlateMaster.id.desc()).all()
-    return templates.TemplateResponse('master_tables.html', context(request, plate_sets=plate_sets, replacements=replacements))
+@app.post("/admin/users/{user_id}")
+def user_admin_update(request: Request, user_id: int, full_name: str = Form(...), email: str = Form(...), password: str = Form(""), db: Session = Depends(get_db)):
+    user = require_login(request, db)
+    require_roles(user, "OWNER", "TECH_TEAM")
+    row = db.query(User).filter(User.id == user_id).first()
+    if row:
+        row.full_name = norm(full_name)
+        row.email = norm(email)
+        if password:
+            row.password_hash = hash_password(password)
+        db.commit()
+    return RedirectResponse("/admin/users", status_code=302)
